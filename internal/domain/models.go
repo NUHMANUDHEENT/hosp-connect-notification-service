@@ -8,3 +8,11 @@ type Notification struct {
 	UserId  string
 	Status  string
 }
+type AppointmentEvent struct {
+	AppointmentId   int
+	Email string
+	VideoURL string
+	DoctorId        string
+	AppointmentDate string
+	Type            string
+}

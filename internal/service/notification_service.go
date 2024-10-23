@@ -20,6 +20,7 @@ type PaymentEvent struct {
 
 type NotificationService interface {
 	SubscribeAndConsume(topic string) error
+	VideoAppointmentSubcribeAndCunsume(topic string) error
 }
 type notificationService struct {
 	consumer *kafka.Consumer
@@ -95,5 +96,67 @@ func SendNotificationSetup(email string, event PaymentEvent) (domain.Notificatio
 	}
 
 	fmt.Println("Notification sent successfully to:", email)
+	return notificationstore, nil
+}
+func (kc notificationService) VideoAppointmentSubcribeAndCunsume(topic string) error {
+	fmt.Println(topic)
+	err := kc.consumer.Subscribe(topic, nil)
+	if err != nil {
+		return fmt.Errorf("failed to subscribe to topic: %w", err)
+	}
+
+	for {
+		msg, err := kc.consumer.ReadMessage(-1)
+		fmt.Println("hiiiii")
+		if err == nil {
+			var appointmentEvent domain.AppointmentEvent
+			err = json.Unmarshal(msg.Value, &appointmentEvent)
+			if err != nil {
+				fmt.Printf("Failed to unmarshal message: %v\n", err)
+				continue
+			}
+
+			fmt.Printf("Received appointment event: %+v\n", appointmentEvent)
+
+			// Send notification (e.g., send email)
+			notificationData, err := SendVideoAppointmentNotification(appointmentEvent.Email, appointmentEvent)
+			if err != nil {
+				fmt.Printf("Failed to send notification: %v\n", err)
+			}
+			err = kc.repo.NotificationStore(notificationData)
+			if err != nil {
+				fmt.Printf("Failed to store notification: %v\n", err)
+			}
+		} else {
+			fmt.Printf("Consumer error: %v\n", err)
+		}
+	}
+}
+
+func SendVideoAppointmentNotification(email string, event domain.AppointmentEvent) (domain.Notification, error) {
+	fmt.Println(event)
+	subject := "Video Appointment Meet Link"
+	body := fmt.Sprintf("Dear Patient,\n\n"+
+		"This is a reminder for your video appointment right now.\n\n"+
+		"Details:\n"+
+		"Appointment ID: %d\n"+
+		"Doctor: Dr. %s\n"+
+		"Appointment Date And Time: %s\n"+
+		"Please join the video call using the following link: %s\n\n"+
+		"Thank you!",
+		event.AppointmentId, event.DoctorId, event.AppointmentDate, event.VideoURL)
+
+	err := di.SendNotificationToEmail(email, subject, body)
+	if err != nil {
+		return domain.Notification{}, fmt.Errorf("failed to send email: %w", err)
+	}
+
+	notificationstore := domain.Notification{
+		Message: body,
+		UserId:  event.Email,
+		Status:  "send",
+	}
+
+	fmt.Println("Video appointment notification sent successfully to:", email)
 	return notificationstore, nil
 }

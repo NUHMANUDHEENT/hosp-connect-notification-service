@@ -11,6 +11,9 @@ func NewNotificationHandler(service service.NotificationService) *notificationHa
 		service: service,
 	}
 }
-func (n *notificationHandler) CunsumeHandler(topic string) error {
+func (n *notificationHandler) PaymentHandler(topic string) error {
 	return n.service.SubscribeAndConsume(topic)
+}
+func (n *notificationHandler) AppointmentHandler(topic string) error {
+	return n.service.VideoAppointmentSubcribeAndCunsume(topic)
 }
