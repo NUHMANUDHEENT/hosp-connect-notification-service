@@ -31,5 +31,5 @@ The **Notification Service** handles sending notifications for various events li
 
 ### Clone the Repository
 ```bash
-git clone https://github.com/your-username/notification-service.git
+git clone https://github.com/NUHMANUDHEENT/hosp-connect-notification-service.git
 cd notification-service
