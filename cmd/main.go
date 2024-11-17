@@ -10,6 +10,7 @@ import (
 func main() {
 	config.LoadEnv()
 	fmt.Println("Notification service is running and waiting for Kafka events...")
+	
 	di.KafkaSetup()
 	select {}
 }

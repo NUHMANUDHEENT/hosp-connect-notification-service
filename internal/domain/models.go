@@ -16,3 +16,11 @@ type AppointmentEvent struct {
 	AppointmentDate string
 	Type            string
 }
+
+type PaymentEvent struct {
+	PaymentID string  `json:"payment_id"`
+	PatientID string  `json:"patient_id"`
+	Email     string  `json:"email"`
+	Amount    float64 `json:"amount"`
+	Date      string  `json:"date"`
+}

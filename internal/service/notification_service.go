@@ -1,236 +1,178 @@
 package service
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"time"
 
-	"github.com/confluentinc/confluent-kafka-go/kafka"
 	"github.com/nuhmanudheent/hosp-connect-notification-service/internal/domain"
 	"github.com/nuhmanudheent/hosp-connect-notification-service/internal/repository"
 	"github.com/nuhmanudheent/hosp-connect-notification-service/internal/utils"
+	"github.com/segmentio/kafka-go"
 )
 
-type PaymentEvent struct {
-	PaymentID string  `json:"payment_id"`
-	PatientID string  `json:"patient_id"`
-	Email     string  `json:"email"`
-	Amount    float64 `json:"amount"`
-	Date      string  `json:"date"`
-}
-
+// In service/notificationService.go
 type NotificationService interface {
-	PaymentSubscribeAndConsume(topic string) error
-	VideoAppointmentSubcribeAndCunsume(topic string) error
-	AppointmentAlertSubscribeAndConsume(topic string) error
+	SubscribeAndConsumePaymentEvents() error
+	SubscribeAndConsumeVideoAppointments() error
+	SubscribeAndConsumeAppointmentAlerts() error
 }
 type notificationService struct {
-	Paymentconsumer          *kafka.Consumer
-	VideoAppointmentConsumer *kafka.Consumer
-	AppointmentAlertConsumer *kafka.Consumer
+	paymentConsumer          *kafka.Reader
+	videoAppointmentConsumer *kafka.Reader
+	appointmentAlertConsumer *kafka.Reader
 	repo                     repository.NotificationRepository
 }
 
-func NewNotificationService(repo repository.NotificationRepository, paymentcons, videoappocons, appalertcons *kafka.Consumer) NotificationService {
+func NewNotificationService(repo repository.NotificationRepository, paymentCons, videoApptCons, alertCons *kafka.Reader) NotificationService {
 	return &notificationService{
 		repo:                     repo,
-		Paymentconsumer:          paymentcons,
-		VideoAppointmentConsumer: videoappocons,
-		AppointmentAlertConsumer: appalertcons,
+		paymentConsumer:          paymentCons,
+		videoAppointmentConsumer: videoApptCons,
+		appointmentAlertConsumer: alertCons,
 	}
 }
 
-// SubscribeAndConsume listens to the topic and processes messages
-func (kc *notificationService) PaymentSubscribeAndConsume(topic string) error {
-	fmt.Println("topic:", topic)
-	err := kc.Paymentconsumer.Subscribe(topic, nil)
-	if err != nil {
-		return fmt.Errorf("failed to subscribe to topic: %w", err)
-	}
-
+func (ns *notificationService) SubscribeAndConsumePaymentEvents() error {
 	for {
-		msg, err := kc.Paymentconsumer.ReadMessage(-1)
+		msg, err := ns.paymentConsumer.ReadMessage(context.Background())
 		if err != nil {
-			fmt.Println("error", err)
-			continue
-		}
-		var paymentEvent PaymentEvent
-		// Deserialize the message
-		err = json.Unmarshal(msg.Value, &paymentEvent)
-		if err != nil {
-			fmt.Printf("Failed to unmarshal message: %v\n", err)
+			fmt.Println("Consumer error:", err)
 			continue
 		}
 
-		fmt.Printf("Received payment event: %+v\n", paymentEvent)
-
-		// Send notification (e.g., send email)
-		notificationData, err := SendNotificationSetup(paymentEvent.Email, paymentEvent)
-		if err != nil {
-			fmt.Printf("Failed to send notification: %v\n", err)
+		var paymentEvent domain.PaymentEvent
+		if err := json.Unmarshal(msg.Value, &paymentEvent); err != nil {
+			fmt.Printf("Failed to unmarshal payment message: %v\n", err)
+			continue
 		}
-		err = kc.repo.NotificationStore(notificationData)
-		if err != nil {
-			fmt.Printf("Failed to store notification: %v\n", err)
 
+		notification, err := createPaymentNotification(paymentEvent)
+		if err != nil {
+			fmt.Printf("Failed to create payment notification: %v\n", err)
+			continue
+		}
+
+		if err := ns.repo.NotificationStore(notification); err != nil {
+			fmt.Printf("Failed to store payment notification: %v\n", err)
+		}
+
+		// Commit the message after processing
+		if err := ns.paymentConsumer.CommitMessages(context.Background(), msg); err != nil {
+			fmt.Printf("Failed to commit message: %v\n", err)
 		}
 		time.Sleep(time.Second)
-
 	}
 }
 
-// SendNotification sends an email notification
-func SendNotificationSetup(email string, event PaymentEvent) (domain.Notification, error) {
+// createPaymentNotification handles sending the email and structuring the notification for storage
+func createPaymentNotification(event domain.PaymentEvent) (domain.Notification, error) {
 	subject := "Payment Confirmation"
-	body := fmt.Sprintf("Dear Patient,\n\n"+
-		"Your payment has been successfully processed.\n\n"+
-		"Details:\n"+
-		"Payment ID: %s\n"+
-		"Patient ID: %s\n"+
-		"Amount: %.2f\n"+
-		"Date: %s\n\n"+
-		"Thank you for your payment!",
-		event.PaymentID, event.PatientID, event.Amount, event.Date)
+	body := fmt.Sprintf("Dear Patient,\n\nYour payment has been processed.\n\nDetails:\nPayment ID: %s\nAmount: %.2f\nDate: %s\n\nThank you!",
+		event.PaymentID, event.Amount, event.Date)
 
-	// Call the function to send the email (this would be your email service)
-	err := utils.SendNotificationToEmail(email, subject, body)
-	if err != nil {
+	if err := utils.SendNotificationToEmail(event.Email, subject, body); err != nil {
 		return domain.Notification{}, fmt.Errorf("failed to send email: %w", err)
 	}
-	var notificationstore = domain.Notification{
+
+	return domain.Notification{
 		Message: body,
 		UserId:  event.PatientID,
-		// Email:   email,
-		Status: "send",
-	}
-
-	fmt.Println("Payment completion notification sent successfully to:", email)
-	return notificationstore, nil
+		Status:  "sent",
+	}, nil
 }
-func (kc *notificationService) VideoAppointmentSubcribeAndCunsume(topic string) error {
-	fmt.Println("topic:", topic)
-	err := kc.VideoAppointmentConsumer.Subscribe(topic, nil)
-	if err != nil {
-		return fmt.Errorf("failed to subscribe to topic: %w", err)
-	}
-
+func (ns *notificationService) SubscribeAndConsumeVideoAppointments() error {
 	for {
-		msg, err := kc.VideoAppointmentConsumer.ReadMessage(-1)
-		fmt.Println("hiiiii")
-		if err == nil {
-			var appointmentEvent domain.AppointmentEvent
-			err = json.Unmarshal(msg.Value, &appointmentEvent)
-			if err != nil {
-				fmt.Printf("Failed to unmarshal message: %v\n", err)
-				continue
-			}
-
-			fmt.Printf("Received appointment event: %+v\n", appointmentEvent)
-
-			// Send notification (e.g., send email)
-			notificationData, err := SendVideoAppointmentNotification(appointmentEvent.Email, appointmentEvent)
-			if err != nil {
-				fmt.Printf("Failed to send notification: %v\n", err)
-			}
-			err = kc.repo.NotificationStore(notificationData)
-			if err != nil {
-				fmt.Printf("Failed to store notification: %v\n", err)
-			}
-		} else {
-			fmt.Printf("Consumer error: %v\n", err)
+		msg, err := ns.videoAppointmentConsumer.ReadMessage(context.Background())
+		if err != nil {
+			fmt.Println("Consumer error:", err)
+			continue
 		}
-		time.Sleep(time.Second)
 
-	}
-}
+		var apptEvent domain.AppointmentEvent
+		if err := json.Unmarshal(msg.Value, &apptEvent); err != nil {
+			fmt.Printf("Failed to unmarshal appointment message: %v\n", err)
+			continue
+		}
 
-func SendVideoAppointmentNotification(email string, event domain.AppointmentEvent) (domain.Notification, error) {
-	fmt.Println(event)
-	subject := "Video Appointment Meet Link"
-	body := fmt.Sprintf("Dear Patient,\n\n"+
-		"This is a reminder for your video appointment right now.\n\n"+
-		"Details:\n"+
-		"Appointment ID: %d\n"+
-		"Doctor: Dr. %s\n"+
-		"Appointment Date And Time: %s\n"+
-		"Please join the video call using the following link: %s\n\n"+
-		"Thank you!",
-		event.AppointmentId, event.DoctorId, event.AppointmentDate, event.VideoURL)
+		notification, err := createVideoAppointmentNotification(apptEvent)
+		if err != nil {
+			fmt.Printf("Failed to create video appointment notification: %v\n", err)
+			continue
+		}
 
-	err := utils.SendNotificationToEmail(email, subject, body)
-	if err != nil {
-		return domain.Notification{}, fmt.Errorf("failed to send email: %w", err)
-	}
+		if err := ns.repo.NotificationStore(notification); err != nil {
+			fmt.Printf("Failed to store video appointment notification: %v\n", err)
+		}
 
-	notificationstore := domain.Notification{
-		Message: body,
-		UserId:  event.Email,
-		Status:  "send",
-	}
-
-	fmt.Println("Video appointment notification sent successfully to:", email)
-	return notificationstore, nil
-}
-func (kc *notificationService) AppointmentAlertSubscribeAndConsume(topic string) error {
-	fmt.Println("topic:", topic)
-	err := kc.AppointmentAlertConsumer.Subscribe(topic, nil)
-	if err != nil {
-		return fmt.Errorf("failed to subscribe to topic: %w", err)
-	}
-
-	for {
-		msg, err := kc.AppointmentAlertConsumer.ReadMessage(-1)
-		if err == nil {
-			var appointmentEvent domain.AppointmentEvent
-			err = json.Unmarshal(msg.Value, &appointmentEvent)
-			if err != nil {
-				fmt.Printf("Failed to unmarshal message: %v\n", err)
-				continue
-			}
-
-			fmt.Printf("Received appointment alert event: %+v\n", appointmentEvent)
-
-			// Send notification (e.g., send email)
-			notificationData, err := SendAppointmentAlertNotification(appointmentEvent.Email, appointmentEvent)
-			if err != nil {
-				fmt.Printf("Failed to send alert notification: %v\n", err)
-			}
-			err = kc.repo.NotificationStore(notificationData)
-			if err != nil {
-				fmt.Printf("Failed to store alert notification: %v\n", err)
-			}
-		} else {
-			fmt.Printf("Consumer error: %v\n", err)
+		if err := ns.videoAppointmentConsumer.CommitMessages(context.Background(), msg); err != nil {
+			fmt.Printf("Failed to commit message: %v\n", err)
 		}
 		time.Sleep(time.Second)
 	}
 }
 
-
-func SendAppointmentAlertNotification(email string, event domain.AppointmentEvent) (domain.Notification, error) {
-	fmt.Println(event)
-	subject := "Appoinmtnt Alert"
-	body := fmt.Sprintf("Dear Patient,\n\n"+
-		"This is a reminder for your appointment on today.\n\n"+
-		"Details:\n"+
-		"Appointment ID: %d\n"+
-		"Doctor: Dr. %s\n"+
-		"Appointment Date And Time: %s\n"+
-		"Please be available the sheduled time: %s\n\n"+
-		"Thank you!",
+// createVideoAppointmentNotification structures the notification for a video appointment
+func createVideoAppointmentNotification(event domain.AppointmentEvent) (domain.Notification, error) {
+	subject := "Video Appointment Reminder"
+	body := fmt.Sprintf("Dear Patient,\n\nYour video appointment is scheduled.\n\nDetails:\nAppointment ID: %d\nDoctor: Dr. %s\nDate & Time: %s\nLink: %s\n\nThank you!",
 		event.AppointmentId, event.DoctorId, event.AppointmentDate, event.VideoURL)
 
-	err := utils.SendNotificationToEmail(email, subject, body)
-	if err != nil {
+	if err := utils.SendNotificationToEmail(event.Email, subject, body); err != nil {
 		return domain.Notification{}, fmt.Errorf("failed to send email: %w", err)
 	}
 
-	notificationstore := domain.Notification{
+	return domain.Notification{
 		Message: body,
 		UserId:  event.Email,
-		Status:  "send",
+		Status:  "sent",
+	}, nil
+}
+func (ns *notificationService) SubscribeAndConsumeAppointmentAlerts() error {
+	for {
+		msg, err := ns.appointmentAlertConsumer.ReadMessage(context.Background())
+		if err != nil {
+			fmt.Println("Consumer error:", err)
+			continue
+		}
+
+		var alertEvent domain.AppointmentEvent
+		if err := json.Unmarshal(msg.Value, &alertEvent); err != nil {
+			fmt.Printf("Failed to unmarshal alert message: %v\n", err)
+			continue
+		}
+
+		notification, err := createAppointmentAlertNotification(alertEvent)
+		if err != nil {
+			fmt.Printf("Failed to create appointment alert notification: %v\n", err)
+			continue
+		}
+
+		if err := ns.repo.NotificationStore(notification); err != nil {
+			fmt.Printf("Failed to store appointment alert notification: %v\n", err)
+		}
+
+		if err := ns.appointmentAlertConsumer.CommitMessages(context.Background(), msg); err != nil {
+			fmt.Printf("Failed to commit message: %v\n", err)
+		}
+		time.Sleep(time.Second)
+	}
+}
+
+// createAppointmentAlertNotification structures the alert notification for upcoming appointments
+func createAppointmentAlertNotification(event domain.AppointmentEvent) (domain.Notification, error) {
+	subject := "Appointment Alert"
+	body := fmt.Sprintf("Dear Patient,\n\nYour appointment is scheduled.\n\nDetails:\nAppointment ID: %d\nDoctor: Dr. %s\nDate & Time: %s\nPlease be ready at the scheduled time.\n\nThank you!",
+		event.AppointmentId, event.DoctorId, event.AppointmentDate)
+
+	if err := utils.SendNotificationToEmail(event.Email, subject, body); err != nil {
+		return domain.Notification{}, fmt.Errorf("failed to send email: %w", err)
 	}
 
-	fmt.Println("alert appointment notification sent successfully to:", email)
-	return notificationstore, nil
+	return domain.Notification{
+		Message: body,
+		UserId:  event.Email,
+		Status:  "sent",
+	}, nil
 }
