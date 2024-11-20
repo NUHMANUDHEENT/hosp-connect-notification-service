@@ -17,4 +17,6 @@ WORKDIR /app
 
 COPY --from=builder /app/notification_service .
 
+COPY .env ./
+
 CMD ["./notification_service"]
