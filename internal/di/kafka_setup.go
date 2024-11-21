@@ -12,13 +12,13 @@ import (
 	"github.com/segmentio/kafka-go"
 )
 
-func NewKafkaConsumer(broker, topic string, partition int) (*kafka.Reader, error) {
+func NewKafkaConsumer(broker, topic,groupID string, partition int) (*kafka.Reader, error) {
 
 	reader := kafka.NewReader(kafka.ReaderConfig{
 		Brokers: []string{broker},
-		// GroupID:     groupID,
+		GroupID:     groupID,
 		Topic:       topic,
-		Partition:   partition,
+		// Partition:   partition,
 		StartOffset: kafka.FirstOffset,
 		MinBytes:    10e3,
 		MaxBytes:    10e6,
@@ -33,17 +33,17 @@ func KafkaSetup() {
 	db := config.InitDatabase()
 	repo := repository.NewNotificationRepo(db)
 
-	paymentConsumer, err := NewKafkaConsumer(os.Getenv("KAFKA_BROKER"), "payment_topic", 0)
+	paymentConsumer, err := NewKafkaConsumer(os.Getenv("KAFKA_BROKER"), "payment_topic", "notification_topic",0)
 	if err != nil {
 		log.Fatalf("Failed to create Kafka consumer for payment topic: %v", err)
 	}
 
-	appointmentConsumer, err := NewKafkaConsumer(os.Getenv("KAFKA_BROKER"), "appointment_topic", 0)
+	appointmentConsumer, err := NewKafkaConsumer(os.Getenv("KAFKA_BROKER"), "appointment_topic", "notification_topic",0)
 	if err != nil {
 		log.Fatalf("Failed to create Kafka consumer for appointment topic: %v", err)
 	}
 
-	appointmentAlertConsumer, err := NewKafkaConsumer(os.Getenv("KAFKA_BROKER"), "alert_topic", 1)
+	appointmentAlertConsumer, err := NewKafkaConsumer(os.Getenv("KAFKA_BROKER"), "alert_topic","notification_topic", 1)
 	if err != nil {
 		log.Fatalf("Failed to create Kafka consumer for alert topic: %v", err)
 	}
