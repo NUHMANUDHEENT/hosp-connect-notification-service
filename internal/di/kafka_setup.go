@@ -51,12 +51,12 @@ func KafkaSetup() {
 	srv := service.NewNotificationService(repo, paymentConsumer, appointmentConsumer, appointmentAlertConsumer)
 	handl := handler.NewNotificationHandler(srv)
 
-	// go func() {
-	// 	err := handl.PaymentHandler()
-	// 	if err != nil {
-	// 		log.Fatalf("Error in payment consumer: %v", err)
-	// 	}
-	// }()
+	go func() {
+		err := handl.PaymentHandler()
+		if err != nil {
+			log.Fatalf("Error in payment consumer: %v", err)
+		}
+	}()
 
 	go func() {
 		err := handl.AppointmentHandler()
@@ -65,10 +65,10 @@ func KafkaSetup() {
 		}
 	}()
 
-	// go func() {
-	// 	err := handl.AppointmentAlertHandler()
-	// 	if err != nil {
-	// 		log.Fatalf("Error in alert_topic consumer: %v", err)
-	// 	}
-	// }()
+	go func() {
+		err := handl.AppointmentAlertHandler()
+		if err != nil {
+			log.Fatalf("Error in alert_topic consumer: %v", err)
+		}
+	}()
 }
